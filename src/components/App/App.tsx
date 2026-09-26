@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { useDebouncedCallback } from 'use-debounce';
-import { deleteNote, fetchNotes } from '../../services/noteService';
+import { fetchNotes } from '../../services/noteService';
 import SearchBox from '../SearchBox/SearchBox';
 import Pagination from '../Pagination/Pagination';
 import NoteList from '../NoteList/NoteList';
@@ -14,7 +14,6 @@ export default function App() {
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const queryClient = useQueryClient();
   const closeModal = useCallback((): void => setIsModalOpen(false), []);
   const updateSearch = useDebouncedCallback((value: string): void => {
     setSearch(value.trim());
@@ -23,13 +22,7 @@ export default function App() {
   const notesQuery = useQuery({
     queryKey: ['notes', page, perPage, search],
     queryFn: ({ signal }) => fetchNotes({ page, perPage, search, signal }),
-  });
-  const deleteMutation = useMutation({
-    mutationFn: deleteNote,
-    onSuccess: async () => {
-      if (notesQuery.data?.notes.length === 1 && page > 1) setPage(page - 1);
-      await queryClient.invalidateQueries({ queryKey: ['notes'] });
-    },
+    placeholderData: keepPreviousData,
   });
   const handleCreated = (): void => {
     updateSearch.cancel();
@@ -39,6 +32,14 @@ export default function App() {
     closeModal();
   };
   const data = notesQuery.data;
+  // Keep the selected page valid when deleting the last note on a later page.
+  if (
+    data &&
+    !notesQuery.isPlaceholderData &&
+    page > Math.max(1, data.totalPages)
+  ) {
+    setPage(Math.max(1, data.totalPages));
+  }
   return (
     <div className={css.app}>
       <header className={css.toolbar}>
@@ -76,18 +77,7 @@ export default function App() {
           </button>
         </p>
       )}
-      {deleteMutation.isError && (
-        <p role="alert">Could not delete the note. Please try again.</p>
-      )}
-      {data && data.notes.length > 0 && (
-        <NoteList
-          notes={data.notes}
-          onDelete={(id: string): void => deleteMutation.mutate(id)}
-          deletingId={
-            deleteMutation.isPending ? deleteMutation.variables : undefined
-          }
-        />
-      )}
+      {data && data.notes.length > 0 && <NoteList notes={data.notes} />}
       {notesQuery.isSuccess && data?.notes.length === 0 && (
         <p role="status">No notes found.</p>
       )}
